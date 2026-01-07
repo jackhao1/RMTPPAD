@@ -6,7 +6,7 @@ import queue
 from PIL import Image, ImageTk
 
 class IndependentVideoPlayer:
-    """独立原始视频播放器（稳定版，无循环导入）"""
+    """独立原始视频播放器：GUI循环播放 + 和预测逻辑解耦"""
     def __init__(self, preview_panel, logger):
         self.preview_panel = preview_panel
         self.logger = logger
@@ -18,20 +18,23 @@ class IndependentVideoPlayer:
         self.fps = 30
         self.frame_delay = 33
         self.lock = threading.Lock()
+        self.total_frames = 0
+        self.allow_loop = True  # 始终允许循环（GUI专用）
 
     def load_video(self, video_path):
         """加载视频并初始化参数"""
-        self.stop()
+        self.stop()  # 停止之前的播放
         
+        self.total_frames = 0  # 初始化总帧数
         with self.lock:
             self.cap = cv2.VideoCapture(video_path)
             if not self.cap or not self.cap.isOpened():
                 self.logger(f"❌ 无法打开视频：{video_path}")
                 return False
             
-            # 获取视频参数
+            # 获取视频原始参数（保证原速）
             self.fps = int(self.cap.get(cv2.CAP_PROP_FPS)) if self.cap.get(cv2.CAP_PROP_FPS) > 0 else 30
-            self.frame_delay = int(1000 / self.fps)
+            self.frame_delay = int(1000 / self.fps)  # 每帧间隔毫秒数
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self.cap.get(cv2.CAP_PROP_FRAME_COUNT) > 0 else 0
             self.logger(f"📽️ 加载视频成功：帧率={self.fps}fps，总帧数={self.total_frames}")
         
@@ -41,11 +44,11 @@ class IndependentVideoPlayer:
                 self.frame_queue.get_nowait()
             except queue.Empty:
                 pass
-        
+            
         return True
 
     def start_play(self):
-        """启动播放线程"""
+        """启动播放线程（GUI循环播放）"""
         with self.lock:
             if not self.cap or self.is_playing:
                 return
@@ -56,7 +59,7 @@ class IndependentVideoPlayer:
         self.play_thread.start()
 
     def _play_loop(self):
-        """播放循环（稳定版，保留循环播放）"""
+        """播放循环：GUI始终循环播放"""
         while True:
             with self.lock:
                 if not self.is_playing:
@@ -64,41 +67,41 @@ class IndependentVideoPlayer:
                 if self.is_paused:
                     time.sleep(0.01)
                     continue
-            
+        
             start_time = time.time()
-            
+        
             # 读取帧
             ret, frame = None, None
             with self.lock:
                 if self.cap and self.cap.isOpened():
                     ret, frame = self.cap.read()
-            
-            # 循环播放
+        
+            # GUI始终循环播放
             if not ret:
                 with self.lock:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                time.sleep(0.01)
-                continue
-            
-            # 放入帧队列
+                    time.sleep(0.01)
+                    continue
+        
+            # 放入帧队列（供预览，非预测）
             try:
                 if self.frame_queue.full():
                     self.frame_queue.get_nowait()
                 self.frame_queue.put(frame.copy(), timeout=0.01)
             except queue.Full:
                 pass
-            
-            # 更新预览
+        
+            # 更新左侧预览（循环显示）
             self._safe_update_left_preview(frame)
     
-            # 控制播放速度
+            # 精准控制播放速度，避免跳帧
             elapsed = int((time.time() - start_time) * 1000)
             sleep_time = max(0, self.frame_delay - elapsed)
             if sleep_time > 0:
                 time.sleep(sleep_time / 1000)
 
     def _safe_update_left_preview(self, frame):
-        """更新左侧预览"""
+        """更新左侧预览（循环显示）"""
         try:
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame_rgb)
@@ -115,7 +118,7 @@ class IndependentVideoPlayer:
             self.logger(f"⚠️ 左侧预览更新失败：{str(e)}")
 
     def get_latest_frame(self):
-        """获取最新帧"""
+        """获取最新帧（仅保留，供兼容）"""
         try:
             return self.frame_queue.get_nowait()
         except queue.Empty:
@@ -132,7 +135,7 @@ class IndependentVideoPlayer:
             self.is_paused = False
 
     def stop(self):
-        """停止播放"""
+        """停止播放（和预测停止同步）"""
         with self.lock:
             self.is_playing = False
             self.is_paused = False
@@ -162,4 +165,4 @@ class IndependentVideoPlayer:
                 self.preview_panel.left_img = None
             self.preview_panel.left_label.after(0, clear_ui)
         
-        self.logger("🛑 视频播放已停止")
+        self.logger("🛑 GUI视频播放已停止")

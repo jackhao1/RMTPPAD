@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import platform  # 新增：导入平台判断模块
 
 # 获取项目根目录
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,15 +33,32 @@ class Config:
     
     @classmethod
     def create_symlinks(cls):
-        """创建软链接到原D盘路径"""
+        """创建软链接到原D盘路径（兼容Windows/Linux）"""
         original_root = r"D:\RMTDRIVE\ultralytics"
         original_runs = os.path.join(original_root, "runs")
+        original_best_pt = os.path.join(original_root, "best.pt")
         
-        # 创建总runs软链接
-        if not os.path.exists(cls.SAVE_ROOT):
-            os.symlink(original_runs, cls.SAVE_ROOT)
-        
-        # 创建模型软链接
-        if not os.path.exists(cls.MODEL_WEIGHT_PATH):
-            original_best_pt = os.path.join(original_root, "best.pt")
-            os.symlink(original_best_pt, cls.MODEL_WEIGHT_PATH)
+        # Windows下创建软链接需要管理员权限，使用mklink命令
+        if platform.system() == "Windows":
+            # 创建总runs软链接
+            if not os.path.exists(cls.SAVE_ROOT):
+                import subprocess
+                subprocess.run(
+                    ["mklink", "/D", cls.SAVE_ROOT, original_runs],
+                    shell=True,
+                    capture_output=True
+                )
+            
+            # 创建模型软链接
+            if not os.path.exists(cls.MODEL_WEIGHT_PATH):
+                subprocess.run(
+                    ["mklink", cls.MODEL_WEIGHT_PATH, original_best_pt],
+                    shell=True,
+                    capture_output=True
+                )
+        else:
+            # Linux/macOS
+            if not os.path.exists(cls.SAVE_ROOT):
+                os.symlink(original_runs, cls.SAVE_ROOT)
+            if not os.path.exists(cls.MODEL_WEIGHT_PATH):
+                os.symlink(original_best_pt, cls.MODEL_WEIGHT_PATH)
