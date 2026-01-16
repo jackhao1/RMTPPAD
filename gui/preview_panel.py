@@ -51,9 +51,14 @@ class PreviewPanel:
             self.right_label.config(text=f"加载失败：{str(e)}", image="")
 
     def _resize_img_to_label(self, img, label):
-        """缩放图片到标签大小"""
-        label_w = label.winfo_width() or 400
-        label_h = label.winfo_height() or 300
+        """缩放图片到标签大小（优化鲁棒性，避免标签未渲染导致的尺寸异常）"""
+        # 优化：避免标签未完成渲染时，winfo_width()/winfo_height()返回0
+        label_w = label.winfo_width()
+        label_h = label.winfo_height()
+        
+        # 兜底尺寸：若标签未渲染完成，使用默认宽高
+        if label_w <= 1 or label_h <= 1:
+            label_w, label_h = 400, 300
         
         img_w, img_h = img.size
         scale = min(label_w/img_w, label_h/img_h, 1.0)
@@ -63,8 +68,17 @@ class PreviewPanel:
         return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     def clear(self):
-        """清空预览区域"""
-        self.left_label.config(text="暂无原始内容", image="")
-        self.right_label.config(text="暂无预测结果", image="")
-        self.left_img = None
-        self.right_img = None
+        """清空预览区域（增加鲁棒性，避免组件已销毁导致的报错）"""
+        try:
+            # 1. 先判断组件是否存在且未被销毁（winfo_exists()：返回1表示组件有效，0表示已销毁）
+            if hasattr(self, 'left_label') and self.left_label.winfo_exists():
+                self.left_label.config(text="暂无原始内容", image="")
+            if hasattr(self, 'right_label') and self.right_label.winfo_exists():
+                self.right_label.config(text="暂无预测结果", image="")
+        except tk.TclError:
+            # 2. 捕获Tkinter组件操作异常（兜底处理，避免程序崩溃）
+            pass
+        finally:
+            # 3. 无论是否报错，都清空图片缓存，释放内存
+            self.left_img = None
+            self.right_img = None
